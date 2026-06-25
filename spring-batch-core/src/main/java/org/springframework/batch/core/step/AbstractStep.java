@@ -307,9 +307,10 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 				stepExecution.setExitStatus(exitStatus.and(ExitStatus.UNKNOWN));
 				stepExecution.addFailureException(e);
 				logger.error(String.format(
-						"Encountered an error saving batch meta data for step %s in job %s. "
+						"Encountered an error saving batch meta data for step %s in job %s (stepExecution id=%d, version=%d). "
 								+ "This job is now in an unknown state and should not be restarted.",
-						name, stepExecution.getJobExecution().getJobInstance().getJobName()), e);
+						name, stepExecution.getJobExecution().getJobInstance().getJobName(), stepExecution.getId(),
+						stepExecution.getVersion()), e);
 			}
 
 			try {
@@ -336,9 +337,10 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 				stepExecution.setExitStatus(exitStatus.and(ExitStatus.UNKNOWN));
 				stepExecution.addFailureException(e);
 				logger.error(String.format(
-						"Encountered an error saving batch meta data for step %s in job %s. "
+						"Encountered an error saving batch meta data for step %s in job %s (stepExecution id=%d, version=%d). "
 								+ "This job is now in an unknown state and should not be restarted.",
-						name, stepExecution.getJobExecution().getJobInstance().getJobName()), e);
+						name, stepExecution.getJobExecution().getJobInstance().getJobName(), stepExecution.getId(),
+						stepExecution.getVersion()), e);
 			}
 
 			try {

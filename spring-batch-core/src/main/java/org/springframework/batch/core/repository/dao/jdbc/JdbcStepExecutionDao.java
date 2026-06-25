@@ -247,10 +247,30 @@ public class JdbcStepExecutionDao extends AbstractJdbcBatchMetadataDao implement
 							Types.BIGINT, Types.BIGINT, Types.VARCHAR, Types.VARCHAR, Types.BIGINT, Types.BIGINT,
 							Types.BIGINT, Types.BIGINT, Types.TIMESTAMP, Types.BIGINT, Types.INTEGER });
 
+			// [DEBUG-INSTRUMENTATION] surface the optimistic-lock outcome with the owning
+			// thread
+			if (logger.isDebugEnabled()) {
+				logger
+					.debug(String.format("[%s] updateStepExecution id=%d status=%s WHERE version=%d -> rowsAffected=%d",
+							Thread.currentThread().getName(), stepExecution.getId(), stepExecution.getStatus(),
+							stepExecution.getVersion(), count));
+			}
+
 			// Avoid concurrent modifications...
 			if (count == 0) {
 				int currentVersion = getJdbcTemplate().queryForObject(getQuery(CURRENT_VERSION_STEP_EXECUTION),
 						Integer.class, stepExecution.getId());
+				// [DEBUG-INSTRUMENTATION] note: currentVersion may be stale here on MySQL
+				// REPEATABLE_READ
+				// because this SELECT reads the caller transaction's snapshot, not the
+				// latest committed row
+				if (logger.isDebugEnabled()) {
+					logger.debug(String.format(
+							"[%s] OPTIMISTIC LOCK LOST on step execution id=%d: attempted version=%d, "
+									+ "currentVersion(read in this tx)=%d",
+							Thread.currentThread().getName(), stepExecution.getId(), stepExecution.getVersion(),
+							currentVersion));
+				}
 				throw new OptimisticLockingFailureException(
 						"Attempt to update step execution id=" + stepExecution.getId() + " with wrong version ("
 								+ stepExecution.getVersion() + "), where current version is " + currentVersion);

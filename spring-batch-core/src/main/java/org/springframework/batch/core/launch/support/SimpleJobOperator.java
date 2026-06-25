@@ -364,6 +364,7 @@ public class SimpleJobOperator extends TaskExecutorJobLauncher implements JobOpe
 								if (tasklet instanceof StoppableTasklet stoppableTasklet) {
 									StepSynchronizationManager.register(stepExecution);
 									stoppableTasklet.stop(stepExecution);
+									logStopPersist(stepExecution);
 									jobRepository.update(stepExecution);
 									jobRepository.updateExecutionContext(stepExecution);
 									StepSynchronizationManager.release();
@@ -372,6 +373,7 @@ public class SimpleJobOperator extends TaskExecutorJobLauncher implements JobOpe
 							if (step instanceof StoppableStep stoppableStep) {
 								StepSynchronizationManager.register(stepExecution);
 								stoppableStep.stop(stepExecution);
+								logStopPersist(stepExecution);
 								jobRepository.update(stepExecution);
 								jobRepository.updateExecutionContext(stepExecution);
 								StepSynchronizationManager.release();
@@ -385,6 +387,20 @@ public class SimpleJobOperator extends TaskExecutorJobLauncher implements JobOpe
 
 		}
 		return true;
+	}
+
+	// [DEBUG-INSTRUMENTATION] make the caller thread's direct persistence of a
+	// still-running
+	// step execution explicit; this update races with the worker thread executing the
+	// same step
+	private void logStopPersist(StepExecution stepExecution) {
+		if (logger.isDebugEnabled()) {
+			logger.debug(String.format(
+					"[%s] stop() persisting running stepExecution id=%d version=%d status=%s from the caller thread "
+							+ "(races with the worker executing this step)",
+					Thread.currentThread().getName(), stepExecution.getId(), stepExecution.getVersion(),
+					stepExecution.getStatus()));
+		}
 	}
 
 	@Override

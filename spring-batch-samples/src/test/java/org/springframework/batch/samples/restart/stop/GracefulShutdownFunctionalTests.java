@@ -22,7 +22,6 @@ import javax.sql.DataSource;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -42,10 +41,12 @@ import org.springframework.batch.infrastructure.item.support.ListItemWriter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.apache.commons.dbcp2.BasicDataSource;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
-import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseBuilder;
-import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.jdbc.datasource.init.DatabasePopulatorUtils;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.jdbc.support.JdbcTransactionManager;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
 
@@ -63,7 +64,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @author Mahmoud Ben Hassine
  *
  */
-@Disabled("Fails intermittently") // https://github.com/spring-projects/spring-batch/issues/5308
 @ExtendWith(SpringExtension.class)
 class GracefulShutdownFunctionalTests {
 
@@ -116,13 +116,20 @@ class GracefulShutdownFunctionalTests {
 				.build();
 		}
 
-		@Bean
+		@Bean(destroyMethod = "close")
 		public DataSource dataSource() {
-			return new EmbeddedDatabaseBuilder().setType(EmbeddedDatabaseType.HSQL)
-				.addScript("/org/springframework/batch/core/schema-drop-hsqldb.sql")
-				.addScript("/org/springframework/batch/core/schema-hsqldb.sql")
-				.generateUniqueName(true)
-				.build();
+			String vendor = System.getProperty("batch.database", "hsqldb");
+			BasicDataSource ds = new BasicDataSource();
+			ds.setDriverClassName(System.getProperty("batch.jdbc.driver", "org.hsqldb.jdbcDriver"));
+			ds.setUrl(System.getProperty("batch.jdbc.url", "jdbc:hsqldb:mem:gracefulShutdown-" + System.nanoTime()
+					+ ";sql.enforce_strict_size=true;hsqldb.tx=mvcc"));
+			ds.setUsername(System.getProperty("batch.jdbc.username", "sa"));
+			ds.setPassword(System.getProperty("batch.jdbc.password", ""));
+			ResourceDatabasePopulator populator = new ResourceDatabasePopulator();
+			populator.addScript(new ClassPathResource("org/springframework/batch/core/schema-drop-" + vendor + ".sql"));
+			populator.addScript(new ClassPathResource("org/springframework/batch/core/schema-" + vendor + ".sql"));
+			DatabasePopulatorUtils.execute(populator, ds);
+			return ds;
 		}
 
 		@Bean

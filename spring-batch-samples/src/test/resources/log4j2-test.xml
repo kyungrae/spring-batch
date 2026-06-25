@@ -6,7 +6,19 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Logger name="org.springframework.batch" level="info" />
+        <Logger name="org.springframework.batch" level="debug" />
+
+        <!-- SQL statements executed by JdbcTemplate (the batch metadata DAOs) -->
+        <Logger name="org.springframework.jdbc.core.JdbcTemplate" level="debug" />
+        <!-- Bound parameter values, e.g. the VERSION used in the optimistic-lock WHERE clause -->
+        <Logger name="org.springframework.jdbc.core.StatementCreatorUtils" level="trace" />
+
+        <!-- Transaction begin / commit / rollback boundaries.
+             The configured manager is JdbcTransactionManager; the log category is the concrete class. -->
+        <Logger name="org.springframework.jdbc.support.JdbcTransactionManager" level="debug" />
+        <Logger name="org.springframework.jdbc.datasource.DataSourceTransactionManager" level="debug" />
+        <Logger name="org.springframework.transaction" level="debug" />
+
         <Root level="error">
             <AppenderRef ref="Console" />
         </Root>
