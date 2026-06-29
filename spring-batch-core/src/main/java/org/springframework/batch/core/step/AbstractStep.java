@@ -18,6 +18,9 @@ package org.springframework.batch.core.step;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
 import io.micrometer.observation.Observation;
@@ -77,6 +80,9 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 	private JobRepository jobRepository;
 
 	protected ObservationRegistry observationRegistry;
+
+	// One lock per running step execution, guarding updates to its metadata.
+	private final ConcurrentMap<Long, Semaphore> stepExecutionLocks = new ConcurrentHashMap<>();
 
 	/**
 	 * Create a new {@link AbstractStep}.
@@ -213,6 +219,7 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 
 		Assert.notNull(stepExecution, "stepExecution must not be null");
 		stepExecution.getExecutionContext().put(SpringBatchVersion.BATCH_VERSION_KEY, SpringBatchVersion.getVersion());
+		this.stepExecutionLocks.put(stepExecution.getId(), createSemaphore());
 
 		if (logger.isDebugEnabled()) {
 			logger.debug("Executing: id=" + stepExecution.getId());
@@ -232,7 +239,13 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 			.lowCardinalityKeyValue(BatchMetrics.METRICS_PREFIX + "step.job.name",
 					stepExecution.getJobExecution().getJobInstance().getJobName())
 			.start();
-		getJobRepository().update(stepExecution);
+		acquireStopLock(stepExecution.getId());
+		try {
+			getJobRepository().update(stepExecution);
+		}
+		finally {
+			releaseStopLock(stepExecution.getId());
+		}
 
 		if (logger.isInfoEnabled()) {
 			logger.info("Executing step: [" + stepExecution.getStepName() + "]");
@@ -298,6 +311,7 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 
 			// save status in job repository before calling listeners
 			// https://github.com/spring-projects/spring-batch/issues/4362
+			acquireStopLock(stepExecution.getId());
 			try {
 				getJobRepository().update(stepExecution);
 				getJobRepository().updateExecutionContext(stepExecution);
@@ -310,6 +324,9 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 						"Encountered an error saving batch meta data for step %s in job %s. "
 								+ "This job is now in an unknown state and should not be restarted.",
 						name, stepExecution.getJobExecution().getJobInstance().getJobName()), e);
+			}
+			finally {
+				releaseStopLock(stepExecution.getId());
 			}
 
 			try {
@@ -327,6 +344,7 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 
 			// save status in job repository after calling listeners (since afterStep
 			// might have changed it)
+			acquireStopLock(stepExecution.getId());
 			try {
 				getJobRepository().update(stepExecution);
 				getJobRepository().updateExecutionContext(stepExecution);
@@ -339,6 +357,9 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 						"Encountered an error saving batch meta data for step %s in job %s. "
 								+ "This job is now in an unknown state and should not be restarted.",
 						name, stepExecution.getJobExecution().getJobInstance().getJobName()), e);
+			}
+			finally {
+				releaseStopLock(stepExecution.getId());
 			}
 
 			try {
@@ -355,6 +376,41 @@ public abstract class AbstractStep implements StoppableStep, InitializingBean, B
 			if (logger.isDebugEnabled()) {
 				logger.debug("Step execution complete: " + stepExecution.getSummary());
 			}
+
+			this.stepExecutionLocks.remove(stepExecution.getId());
+		}
+	}
+
+	/**
+	 * Create the semaphore guarding updates to a single step execution's metadata (one
+	 * per running step execution).
+	 * @return a new semaphore guarding updates to a step execution
+	 */
+	protected Semaphore createSemaphore() {
+		return new Semaphore(1);
+	}
+
+	/**
+	 * @param stepExecution the running step execution
+	 * @return the lock for the step execution, or {@code null}
+	 */
+	protected Semaphore getStepExecutionLock(StepExecution stepExecution) {
+		return this.stepExecutionLocks.get(stepExecution.getId());
+	}
+
+	@Override
+	public void acquireStopLock(long stepExecutionId) {
+		Semaphore semaphore = this.stepExecutionLocks.get(stepExecutionId);
+		if (semaphore != null) {
+			semaphore.acquireUninterruptibly();
+		}
+	}
+
+	@Override
+	public void releaseStopLock(long stepExecutionId) {
+		Semaphore semaphore = this.stepExecutionLocks.get(stepExecutionId);
+		if (semaphore != null) {
+			semaphore.release();
 		}
 	}
 

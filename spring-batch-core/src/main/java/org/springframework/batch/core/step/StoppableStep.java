@@ -43,4 +43,25 @@ public interface StoppableStep extends Step {
 		stepExecution.setEndTime(LocalDateTime.now());
 	}
 
+	/**
+	 * Acquire the lock that serialises updates to the metadata of the step execution with
+	 * the given id, blocking until it is available. This lets a caller that persists the
+	 * stopped state (for example a job operator on its own thread) run mutually exclusive
+	 * with the step's own concurrent updates, such as chunk commits on the worker thread,
+	 * so that neither writer observes a stale version. Must be paired with
+	 * {@link #releaseStopLock(long)} in a {@code finally} block. The default
+	 * implementation does nothing (no locking).
+	 * @param stepExecutionId the id of the step execution to lock
+	 */
+	default void acquireStopLock(long stepExecutionId) {
+	}
+
+	/**
+	 * Release the lock acquired by {@link #acquireStopLock(long)}. The default
+	 * implementation does nothing.
+	 * @param stepExecutionId the id of the step execution to unlock
+	 */
+	default void releaseStopLock(long stepExecutionId) {
+	}
+
 }

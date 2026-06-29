@@ -368,32 +368,40 @@ public class ChunkOrientedStep<I, O> extends AbstractStep {
 	protected void doExecute(StepExecution stepExecution) throws Exception {
 		stepExecution.getExecutionContext().put(STEP_TYPE_KEY, this.getClass().getName());
 		while (this.chunkTracker.get().moreItems() && !interrupted(stepExecution)) {
-			// process next chunk in its own transaction
-			this.transactionTemplate.executeWithoutResult(transactionStatus -> {
-				ChunkTransactionEvent chunkTransactionEvent = new ChunkTransactionEvent(stepExecution.getStepName(),
-						stepExecution.getId());
-				chunkTransactionEvent.begin();
-				StepContribution contribution = stepExecution.createStepContribution();
-				processNextChunk(transactionStatus, contribution, stepExecution);
+			// process next chunk in its own transaction, under the step execution lock
+			acquireStopLock(stepExecution.getId());
+			try {
+				this.transactionTemplate.executeWithoutResult(transactionStatus -> {
+					ChunkTransactionEvent chunkTransactionEvent = new ChunkTransactionEvent(stepExecution.getStepName(),
+							stepExecution.getId());
+					chunkTransactionEvent.begin();
+					StepContribution contribution = stepExecution.createStepContribution();
+					processNextChunk(transactionStatus, contribution, stepExecution);
 
-				// Skip update during rollback to avoid OptimisticLockingFailureException
-				if (transactionStatus.isRollbackOnly()) {
-					// Explicitly mark as locally rollback-only to prevent
-					// UnexpectedRollbackException when the transaction manager
-					// (eg JpaTransactionManager) has marked it as globally rollback-only
-					// (eg after a JPA flush failure) but not locally rollback-only.
-					transactionStatus.setRollbackOnly();
-					chunkTransactionEvent.transactionStatus = BatchMetrics.STATUS_ROLLED_BACK;
+					// Skip update during rollback to avoid
+					// OptimisticLockingFailureException
+					if (transactionStatus.isRollbackOnly()) {
+						// Explicitly mark as locally rollback-only to prevent
+						// UnexpectedRollbackException when the transaction manager
+						// (eg JpaTransactionManager) has marked it as globally
+						// rollback-only
+						// (eg after a JPA flush failure) but not locally rollback-only.
+						transactionStatus.setRollbackOnly();
+						chunkTransactionEvent.transactionStatus = BatchMetrics.STATUS_ROLLED_BACK;
+						chunkTransactionEvent.commit();
+						return;
+					}
+
+					this.compositeItemStream.update(stepExecution.getExecutionContext());
+					getJobRepository().updateExecutionContext(stepExecution);
+					getJobRepository().update(stepExecution);
+					chunkTransactionEvent.transactionStatus = BatchMetrics.STATUS_COMMITTED;
 					chunkTransactionEvent.commit();
-					return;
-				}
-
-				this.compositeItemStream.update(stepExecution.getExecutionContext());
-				getJobRepository().updateExecutionContext(stepExecution);
-				getJobRepository().update(stepExecution);
-				chunkTransactionEvent.transactionStatus = BatchMetrics.STATUS_COMMITTED;
-				chunkTransactionEvent.commit();
-			});
+				});
+			}
+			finally {
+				releaseStopLock(stepExecution.getId());
+			}
 		}
 	}
 
