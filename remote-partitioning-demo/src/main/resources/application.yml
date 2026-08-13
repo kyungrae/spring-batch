@@ -1,0 +1,22 @@
+# Shared by BOTH roles. Same datasource + same broker on manager and workers.
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:5432/spring_batch
+    username: root
+    password:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+  # NOTE: `spring.batch.jdbc.initialize-schema` is a no-op on Spring Boot 4 (the batch
+  # schema initializer was removed). Schema creation is done per-profile via
+  # `spring.sql.init` instead (see application-local.yml for MySQL). JDBC persistence
+  # itself is turned on by @EnableBatchProcessing + @EnableJdbcJobRepository on
+  # DemoApplication — without them the default JobRepository is the in-memory
+  # ResourcelessJobRepository and nothing is written to the database.
+  batch:
+    job:
+      # only the launcher (JobRunner/LocalJobRunner) starts a job, nothing auto-runs
+      enabled: false
