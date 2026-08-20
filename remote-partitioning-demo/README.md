@@ -2,8 +2,10 @@
 
 Two runnable pieces:
 
-1. **This 2-process demo** (`remote-partitioning-demo/`) — a real manager/worker split over
-   RabbitMQ + a shared Postgres. Needs a broker + DB, so it is **not** runnable offline.
+1. **This demo** (`remote-partitioning-demo/`) — a plain-Java (no Spring Boot) project that
+   depends on the locally built spring-batch 6.0.5-SNAPSHOT modules. It has a `local`
+   profile (in-JVM range partitioning, runs against MySQL) and `manager`/`worker` profiles
+   (a real cross-JVM split over RabbitMQ). See **Running** below.
 2. **A deterministic race test that IS runnable in this repo, offline:**
    `spring-batch-core/src/test/java/org/springframework/batch/core/repository/dao/jdbc/RemoteStopVersionRaceTests.java`
    — reproduces the exact cross-JVM optimistic-lock race the semaphore cannot cover.
@@ -64,69 +66,67 @@ A semaphore cannot cross JVMs anyway. What used to absorb this cross-JVM race wa
 `RemoteStopVersionRaceTests` proves both halves: without it the stop update throws
 `OptimisticLockingFailureException`; restoring it reconciles the version and succeeds.
 
-## Running with Spring Boot
+## Running (no Spring Boot)
 
-The project is one Spring Boot app (`DemoApplication`) with three profiles. A Maven
-wrapper is bundled, so `./mvnw` works without a system Maven install. Spring Boot 4.0.x
-(which brings Spring Batch 6.0.x) is downloaded on first build — the **first run needs
-internet**; after that it is cached.
+This is a plain-Java app wired like `spring-batch-samples`: its `pom.xml` uses the
+spring-batch **reactor** as its `<parent>` and depends on the locally built
+`spring-batch-core` / `spring-batch-integration` **6.0.5-SNAPSHOT** — not jars pinned by a
+Spring Boot BOM. Batch infrastructure is hand-wired (`@EnableBatchProcessing` +
+`@EnableJdbcJobRepository`, a `DataSource`/`transactionManager`, a `DataSourceInitializer`
+for schema, manual RabbitMQ beans). Entry point is `Main`; run it with `exec:java` and a
+profile argument. Uses the repo's bundled `./mvnw`.
 
-### A) LOCAL partitioning — no broker, no external DB (✅ verified end-to-end)
+> Metadata store is MySQL (`jdbc:mysql://localhost:3306/spring_batch`, root / no password).
+> Override with `-Ddb.url=… -Ddb.user=… -Ddb.pass=…`.
 
-Single JVM, in-memory H2, partitions run on a thread pool. Nothing to install.
+### A) LOCAL partitioning — no broker (✅ verified end-to-end against MySQL)
 
-```bash
-cd remote-partitioning-demo
-./mvnw spring-boot:run -Dspring-boot.run.profiles=local
-```
-
-Expected output (partitions run concurrently, then the job completes and the app exits):
-
-```
-[SimpleAsyncTaskExecutor-1] processing workerStep:partition0
-[SimpleAsyncTaskExecutor-2] processing workerStep:partition1
-[SimpleAsyncTaskExecutor-3] processing workerStep:partition2
-Job: [localPartitionedJob] ... status: [COMPLETED]
-Launched localPartitionedJob, status = COMPLETED, id = 1
-```
-
-Config: `LocalPartitioningConfiguration` (`TaskExecutorPartitionHandler` via
-`.taskExecutor(...)`) + `application-local.yml` (H2). Because every worker StepExecution
-runs in THIS JVM, a stop here takes the semaphore **locked** branch — the case PR #5448
-fixes directly.
-
-### B) REMOTE partitioning — real manager/worker split (needs RabbitMQ + Postgres)
+Single JVM; partitions run on a thread pool. The `DataSourceInitializer` drops + recreates
+the `BATCH_*` and `PEOPLE` tables and seeds 10 rows each run.
 
 ```bash
 cd remote-partitioning-demo
-docker compose up -d                 # rabbitmq + postgres
-
-# terminal 1 — worker(s)
-./mvnw spring-boot:run -Dspring-boot.run.profiles=worker
-# terminal 2 — another worker (optional)
-./mvnw spring-boot:run -Dspring-boot.run.profiles=worker
-# terminal 3 — manager (launches the job)
-./mvnw spring-boot:run -Dspring-boot.run.profiles=manager
+./mvnw exec:java -Dexec.args=local
 ```
 
-`@Profile("manager")` / `@Profile("worker")` guards keep each process to its own half, so
-the duplicate `requests()`/`replies()` channel beans never collide in one context.
-Uncomment the `jobOperator.stop(...)` lines in `JobRunner` to watch the manager issue a
-stop while partitions run on the worker JVM(s) — the **null-lock** branch this review is about.
+Expected output — each worker reads only its own ID range:
 
-### Packaging instead of `spring-boot:run`
+```
+[SimpleAsyncTaskExecutor-1] processed range: [Person[id=1..], ..id=4]
+[SimpleAsyncTaskExecutor-2] processed range: [Person[id=5..], ..id=8]
+[SimpleAsyncTaskExecutor-3] processed range: [Person[id=9..], id=10]
+Job [localPartitionedJob] finished with status COMPLETED
+```
+```
+BATCH_STEP_EXECUTION: managerStep(READ 10) + workerStep:partition0/1/2 (READ 4/4/2)
+```
+
+Every worker StepExecution runs in THIS JVM, so a stop here takes the semaphore **locked**
+branch — the case PR #5448 fixes directly.
+
+### B) REMOTE partitioning — real manager/worker split (needs RabbitMQ + shared MySQL)
 
 ```bash
-./mvnw -DskipTests package
-java -jar target/remote-partitioning-demo-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
+cd remote-partitioning-demo
+docker compose up -d          # rabbitmq (management UI on :15672, guest/guest)
+# shared MySQL: reuse your local spring_batch DB (manager prepares the schema)
+
+# terminal 1..n — worker(s): listen and execute partitions
+./mvnw exec:java -Dexec.args=worker
+# terminal — manager: splits + sends StepExecutionRequests, then waits
+./mvnw exec:java -Dexec.args=manager
 ```
 
-> This folder is a standalone project, unrelated to the surrounding spring-batch Maven
-> reactor. If your available Spring Boot 4.x differs, adjust the parent version in `pom.xml`.
+`@Profile("manager")` / `@Profile("worker")` keep each process to its own half. The worker
+profile does NOT initialize the schema (it connects to the DB the manager prepared). The
+worker's `StepExecutionRequestHandler` is where `workerStep.execute()` runs — in a
+DIFFERENT JVM from the manager's `JobOperator`, so a stop there takes the **null-lock**
+branch this review is about. (Not verified offline — needs a running RabbitMQ.)
 
 ## Profiles at a glance
 
-| Profile  | Handler | Transport | Store | Runs offline? |
-|----------|---------|-----------|-------|---------------|
-| `local`  | `TaskExecutorPartitionHandler` (in-JVM threads) | none | H2 (in-memory) | ✅ yes |
-| `manager`/`worker` | `MessageChannelPartitionHandler` (remote) | RabbitMQ | Postgres | ❌ needs infra |
+| Profile  | Handler | Transport | Schema init | Verified here |
+|----------|---------|-----------|-------------|---------------|
+| `local`  | `TaskExecutorPartitionHandler` (in-JVM threads) | none | drop+create BATCH_* & PEOPLE | ✅ against MySQL |
+| `manager` | `MessageChannelPartitionHandler` (remote) | RabbitMQ | drop+create BATCH_* | compiles; needs RabbitMQ |
+| `worker` | runs `workerStep.execute()` per request | RabbitMQ | none (uses manager's) | compiles; needs RabbitMQ |

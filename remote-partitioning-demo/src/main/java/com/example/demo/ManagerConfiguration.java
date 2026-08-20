@@ -56,13 +56,11 @@ public class ManagerConfiguration {
 
 	// the partitioned (manager) step
 	@Bean
-	public Step managerStep(
-			JobRepository jobRepository,
-			@Qualifier("requests") MessageChannel requests,
-			@Qualifier("replies") MessageChannel replies
-	) {
+	public Step managerStep(JobRepository jobRepository, @Qualifier("requests") MessageChannel requests,
+			@Qualifier("replies") MessageChannel replies) {
 		return new RemotePartitioningManagerStepBuilder("managerStep", jobRepository)
-			.partitioner("workerStep", partitioner()) // NAME of the worker step + how to split
+			.partitioner("workerStep", partitioner()) // NAME of the worker step + how to
+														// split
 			.gridSize(3) // 3 partitions -> 3 StepExecutions
 			.outputChannel(requests) // where StepExecutionRequests go out
 			.inputChannel(replies) // where worker results come back
@@ -71,7 +69,8 @@ public class ManagerConfiguration {
 
 	@Bean
 	public Partitioner partitioner() {
-		// Real jobs split by id-range / file / grid key; SimplePartitioner just makes N contexts.
+		// Real jobs split by id-range / file / grid key; SimplePartitioner just makes N
+		// contexts.
 		return new SimplePartitioner();
 	}
 

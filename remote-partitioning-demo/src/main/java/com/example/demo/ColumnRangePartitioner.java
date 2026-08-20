@@ -15,9 +15,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * the "who is responsible for which slice of the data" logic Q1 was about.
  *
  * <p>
- * It queries {@code MIN(column)}/{@code MAX(column)}, divides that span into equal ranges,
- * and writes each range into a partition's {@link ExecutionContext} as {@code minValue} /
- * {@code maxValue}. The worker step then reads only {@code WHERE column BETWEEN minValue
+ * It queries {@code MIN(column)}/{@code MAX(column)}, divides that span into equal
+ * ranges, and writes each range into a partition's {@link ExecutionContext} as
+ * {@code minValue} / {@code maxValue}. The worker step then reads only
+ * {@code WHERE column BETWEEN minValue
  * AND maxValue}, so each worker owns a disjoint slice. (Copied from
  * {@code org.springframework.batch.samples.common.ColumnRangePartitioner}.)
  */
@@ -59,7 +60,7 @@ public class ColumnRangePartitioner implements Partitioner {
 			if (end >= max) {
 				end = max;
 			}
-			value.putInt("minValue", start);   // this partition owns [minValue, maxValue]
+			value.putInt("minValue", start); // this partition owns [minValue, maxValue]
 			value.putInt("maxValue", end);
 			start += targetSize;
 			end += targetSize;
