@@ -2,10 +2,12 @@ package com.example.demo;
 
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.Step;
 import org.springframework.batch.integration.partition.RemotePartitioningWorkerStepBuilder;
 import org.springframework.batch.infrastructure.repeat.RepeatStatus;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,7 +15,9 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.integration.amqp.dsl.Amqp;
 import org.springframework.integration.channel.DirectChannel;
 import org.springframework.integration.dsl.IntegrationFlow;
+import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.transaction.PlatformTransactionManager;
 
 /**
@@ -36,8 +40,11 @@ public class WorkerConfiguration {
 	}
 
 	@Bean
-	public IntegrationFlow inboundRequests(ConnectionFactory connectionFactory) {
-		return IntegrationFlow.from(Amqp.inboundAdapter(connectionFactory, "requests")).channel(requests()).get();
+	public IntegrationFlow inboundRequests(ConnectionFactory connectionFactory, MessageConverter messageConverter) {
+		return IntegrationFlow
+			.from(Amqp.inboundAdapter(connectionFactory, "requests").messageConverter(messageConverter))
+			.channel(requests())
+			.get();
 	}
 
 	// outbound: this worker -> manager (replies)
@@ -54,9 +61,10 @@ public class WorkerConfiguration {
 	// the actual worker step — its execute() is what PR #5448 is about
 	@Bean
 	public Step workerStep(JobRepository jobRepository, PlatformTransactionManager transactionManager,
-			@Qualifier("requests") MessageChannel requests, @Qualifier("replies") MessageChannel replies) {
-
-		return new RemotePartitioningWorkerStepBuilder("workerStep", jobRepository).inputChannel(requests)
+			BeanFactory beanFactory, @Qualifier("requests") MessageChannel requests,
+			@Qualifier("replies") MessageChannel replies) {
+		return new RemotePartitioningWorkerStepBuilder("workerStep", jobRepository).beanFactory(beanFactory)
+			.inputChannel(requests)
 			.outputChannel(replies)
 			.tasklet((contribution, chunkContext) -> {
 				System.out.println("Processing partition on worker: "

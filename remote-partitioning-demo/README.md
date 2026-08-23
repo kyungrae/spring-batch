@@ -66,18 +66,7 @@ A semaphore cannot cross JVMs anyway. What used to absorb this cross-JVM race wa
 `RemoteStopVersionRaceTests` proves both halves: without it the stop update throws
 `OptimisticLockingFailureException`; restoring it reconciles the version and succeeds.
 
-## Running (no Spring Boot)
-
-This is a plain-Java app wired like `spring-batch-samples`: its `pom.xml` uses the
-spring-batch **reactor** as its `<parent>` and depends on the locally built
-`spring-batch-core` / `spring-batch-integration` **6.0.5-SNAPSHOT** — not jars pinned by a
-Spring Boot BOM. Batch infrastructure is hand-wired (`@EnableBatchProcessing` +
-`@EnableJdbcJobRepository`, a `DataSource`/`transactionManager`, a `DataSourceInitializer`
-for schema, manual RabbitMQ beans). Entry point is `Main`; run it with `exec:java` and a
-profile argument. Uses the repo's bundled `./mvnw`.
-
-> Metadata store is MySQL (`jdbc:mysql://localhost:3306/spring_batch`, root / no password).
-> Override with `-Ddb.url=… -Ddb.user=… -Ddb.pass=…`.
+## Running
 
 ### A) LOCAL partitioning — no broker (✅ verified end-to-end against MySQL)
 
@@ -108,12 +97,9 @@ branch — the case PR #5448 fixes directly.
 
 ```bash
 cd remote-partitioning-demo
-docker compose up -d          # rabbitmq (management UI on :15672, guest/guest)
-# shared MySQL: reuse your local spring_batch DB (manager prepares the schema)
+docker compose up -d
 
-# terminal 1..n — worker(s): listen and execute partitions
 ./mvnw exec:java -Dexec.args=worker
-# terminal — manager: splits + sends StepExecutionRequests, then waits
 ./mvnw exec:java -Dexec.args=manager
 ```
 

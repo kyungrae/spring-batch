@@ -6,6 +6,7 @@ import org.springframework.batch.core.job.parameters.JobParameters;
 import org.springframework.batch.core.job.parameters.JobParametersBuilder;
 import org.springframework.batch.core.launch.JobOperator;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.integration.dsl.context.IntegrationFlowContext;
 
 /**
  * Plain-Java entry point (no Spring Boot). Pick a profile with the first program
@@ -29,6 +30,7 @@ public final class Main {
 		context.register(DataSourceConfiguration.class, BatchConfiguration.class, AmqpConfiguration.class,
 				LocalPartitioningConfiguration.class, ManagerConfiguration.class, WorkerConfiguration.class);
 		context.refresh();
+		startRemotePartitioningFlows(context, profile);
 
 		switch (profile) {
 			case "local" -> {
@@ -58,6 +60,25 @@ public final class Main {
 			.toJobParameters();
 		JobExecution execution = jobOperator.start(job, params);
 		System.out.println("Job [" + jobName + "] finished with status " + execution.getStatus());
+	}
+
+	/**
+	 * The remote partitioning step builders register their integration flows with
+	 * {@code autoStartup(false)} (RemotePartitioningWorkerStepBuilder:248,
+	 * RemotePartitioningManagerStepBuilder:204), so nothing subscribes the
+	 * StepExecutionRequestHandler to the requests channel unless we start them here.
+	 * Symptom when missing: the broker redelivers every request forever ("Dispatcher has
+	 * no subscribers") and the manager blocks in receiveReplies() with no timeout.
+	 */
+	private static void startRemotePartitioningFlows(AnnotationConfigApplicationContext context, String profile) {
+		if (profile.equals("local")) {
+			return;
+		}
+		IntegrationFlowContext flowContext = context.getBean(IntegrationFlowContext.class);
+		flowContext.getRegistry().forEach((id, registration) -> {
+			System.out.println("Starting integration flow registration: " + id);
+			registration.start();
+		});
 	}
 
 }

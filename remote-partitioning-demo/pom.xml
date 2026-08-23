@@ -56,6 +56,19 @@
 			<artifactId>spring-rabbit</artifactId>
 			<version>${spring-amqp.version}</version>
 		</dependency>
+		<!-- Without a binding, slf4j-api 1.7 falls back to a NOP logger and every Spring
+		     log line (including startup failures) is silently discarded. -->
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-api</artifactId>
+			<version>2.0.16</version>
+		</dependency>
+		<dependency>
+			<groupId>org.slf4j</groupId>
+			<artifactId>slf4j-simple</artifactId>
+			<version>2.0.16</version>
+			<scope>runtime</scope>
+		</dependency>
 	</dependencies>
 
 	<build>

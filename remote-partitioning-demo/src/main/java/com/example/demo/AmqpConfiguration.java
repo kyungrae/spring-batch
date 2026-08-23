@@ -1,10 +1,14 @@
 package com.example.demo;
 
+import java.util.List;
+
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbit.connection.CachingConnectionFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.amqp.support.converter.SimpleMessageConverter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -31,9 +35,25 @@ public class AmqpConfiguration {
 		return connectionFactory;
 	}
 
+	/**
+	 * spring-amqp 4.x refuses to deserialize a Java-serialized payload unless its class
+	 * matches an allowed pattern (see
+	 * {@code org.springframework.amqp.utils.SerializationUtils}). Without this the worker
+	 * rejects every StepExecutionRequest before it ever reaches the requests channel, and
+	 * the broker redelivers it forever (millions of redeliveries, no visible error).
+	 */
 	@Bean
-	public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory) {
-		return new RabbitTemplate(connectionFactory);
+	public MessageConverter messageConverter() {
+		SimpleMessageConverter converter = new SimpleMessageConverter();
+		converter.setAllowedListPatterns(List.of("org.springframework.batch.*", "java.*"));
+		return converter;
+	}
+
+	@Bean
+	public RabbitTemplate rabbitTemplate(ConnectionFactory connectionFactory, MessageConverter messageConverter) {
+		RabbitTemplate template = new RabbitTemplate(connectionFactory);
+		template.setMessageConverter(messageConverter);
+		return template;
 	}
 
 	@Bean
